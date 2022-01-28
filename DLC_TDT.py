@@ -6,7 +6,7 @@ data=[]
 subject=input('Subject id:')
 
 
-os.chdir(r'C:\Users\jacobsd\OneDrive')
+os.chdir(r'C:\Users')
 
 os.chdir(subject)
 
