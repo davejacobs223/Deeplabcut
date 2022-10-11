@@ -191,14 +191,12 @@ for subjecta in Subjects:
 		itiaborts=itidata[2]
 
 
+
 		# some other metrics
-		bodyangles=bodyangle(maindict,SL=seeklocation,TL=takelocation)
+		bodyangles=bodyangle(maindict,SL=seeklocation,TL=takelocation,side=sidechoice)
 		Tortuositydata=tortuosity(maindict)
 		finalapproachdata=findlastapproach(maindict,distancedict,minseek=abortthreshold)
-
-
-
-
+		itidist=distancetraveled(itimaindict)
 
 		#analyze the behavioral abort and final approach data
 		aborts=np.array(aborts)
@@ -225,14 +223,15 @@ for subjecta in Subjects:
 		aborts_update=np.c_[aborts_update,newcol2]
 		aborts_update=np.c_[aborts_update,headatpoke]
 		aborts_update=np.c_[aborts_update,bodyangles]
+		aborts_update=np.c_[aborts_update,itidist]
 
 		# make a new DF with the analysis to writeout to csv
-		abortbyblock=pd.DataFrame(aborts_update).groupby(by=3).mean().drop(0,1).rename(columns={1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle'})
-		sumbyblock=pd.DataFrame(aborts_update).groupby(by=3).sum().drop(0,1).rename(columns={1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle'})
+		abortbyblock=pd.DataFrame(aborts_update).groupby(by=3).mean().drop(0,1).rename(columns={1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
+		sumbyblock=pd.DataFrame(aborts_update).groupby(by=3).sum().drop(0,1).rename(columns={1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
 
 
-		abortbyblock_all=pd.DataFrame(aborts_update).drop(0,1).rename(columns={1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle'})
-		sumbyblock_all=pd.DataFrame(aborts_update).drop(0,1).rename(columns={1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle'})
+		abortbyblock_all=pd.DataFrame(aborts_update).rename(columns={0:"Trial",1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
+		sumbyblock_all=pd.DataFrame(aborts_update).rename(columns={0:"Trial",1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
 		#kick in the subject and session
 		abortbyblock['Subject']=subjectname
 		abortbyblock['Session']=sessionout
@@ -271,10 +270,73 @@ for subjecta in Subjects:
 	os.chdir('../')
 
 #to csv we go
-abortcountdf.reset_index().rename(columns={3:'Block'}).to_csv('abortdata.csv')
-abortcountdf_all.reset_index().rename(columns={3:'Block'}).to_csv('abortdataalltrials.csv')
+abortcountdf.reset_index(inplace=True)
+abortcountdf = abortcountdf.rename(columns={3:'Block'})
+abortcountdf.to_csv('abortdata.csv')
+abortcountdf_all.reset_index(inplace=True)
+abortcountdf_all = abortcountdf_all.rename(columns={3:'Block'})
+abortcountdf_all.to_csv('abortdataalltrials.csv')
+
+# ######
+# abortcountdf.reset_index(inplace=True).rename(columns={3:'Block'})
+# abortcountdf_all.reset_index(inplace=True).rename(columns={3:'Block'})
+
+def get_cmap(n, name='hsv'):
+    # Get spectrum of n unique colors
+    return plt.cm.get_cmap(name, n)
+
+# Generate plots for # aborts per block per subject"
+# Get data for subject
+subs = list(SideDict.keys())
+subs = subs[:3] ############## try a few for now
+sess_names = abortcountdf['Session'].unique()
+blocks = abortcountdf['Block'].unique()
+cmap = get_cmap(len(sess_names), name='hsv')
+
+for sub in subs:
+	plt.figure()
+	plt.title(f"Subject {sub}: # of aborts per block by session")
+	this_sub = abortcountdf[abortcountdf['Subject'] == sub]
+	for i in range(len(sess_names)):
+		sess = sess_names[i]
+		sess_df = this_sub[this_sub['Session'] == sess]
+		# print()
+		# print(blocks)
+		# print(sess_df)
+		plt.plot(blocks, sess_df['Abort#(Sum)'], marker='o', color = cmap(i), label = sess)
+	plt.xlabel('Block')
+	plt.ylabel('# aborts')
+	plt.legend(loc = 'upper right')
+	plt.savefig(os.getcwd() + '\\' + sub + "\\session_aborts")
+
+# Gen plots for avg number aborts per block across subjects w/ error
+grouped = abortcountdf.groupby(['Session', 'Block']).agg({'Abort#(Sum)': ['mean', 'sem']}) # Has multiindex = ('Session', "Block")
+
+plt.figure()
+
+#sess_index = grouped.index.get_level_values('Session')
+cmap = get_cmap(len(sess_names), name='hsv')
+for i in range(len(sessions)):
+	sess = sessions[i]
+	sess_data = grouped.loc[sess,] # get data for this session
+	blocks = list(sess_data['Abort#(Sum)']['mean'].index)
+	plt.plot(blocks, sess_data['Abort#(Sum)']['mean'], marker='o', markersize=7, color = cmap(i), label = sess)
+	plt.errorbar(x = sess_data.index, 
+		y = sess_data['Abort#(Sum)']['mean'], 
+		yerr = sess_data['Abort#(Sum)']['sem'], 
+		color = cmap(i),
+		capsize = 3)
+	# axes = plt.gca()
+	# axes.set_ylim(bottom=0)
+# 	plt.savefig(os.getcwd() + '\\' + sess +"_avg_aborts_by_block")
+axes = plt.gca()
+axes.set_ylim(bottom=0)
+plt.legend(loc = 'upper right')
+# plt.show()
 
 
+for i, (X, Y) in enumerate(data):
+   scatter(X, Y, c=cmap(i))
 
 
 

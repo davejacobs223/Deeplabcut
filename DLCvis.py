@@ -166,7 +166,7 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 
 #UPDATED note this uses the angle WHEN the nosepoke happens
 #bodyangle(maindict,seek location, take location)
-def bodyangle(data,SL,TL):
+def bodyangle(data,SL,TL,side='l'):
 	datahold=[]
 
 	for a in range(len(data)):
@@ -177,16 +177,61 @@ def bodyangle(data,SL,TL):
 			l1y1=data[a+1]['y-implant'][-1]#[len(data[a+1])-2:-1][0]
 			l1x2=data[a+1]['x-body'][-1]#[len(data[a+1])-2:-1][0]
 			l1y2=data[a+1]['y-body'][-1]#[len(data[a+1])-2:-1][0]
+			leX=data[a+1]['x-leftear'][-1]
+			leY=data[a+1]['y-leftear'][-1]
+			reX=data[a+1]['x-rightear'][-1]
+			reY=data[a+1]['y-rightear'][-1]
 
 			head=np.array([l1x1,l1x2])
 			body=np.array([l1y1,l1y2])
+			xpoke=np.array([SL[0],TL[0]])
+			ypoke=np.array([SL[1],TL[1]])
+
+			headspot=np.array([l1x1,l1y1])
+			bodyspot=np.array([l1x2,l1y2])
+			lefte=np.array([leX,leY])
+			righte=np.array([reX,reY])
 
 			s1=np.polyfit(head,body,1)[0]
-			s2=np.polyfit(SL,TL,1)[0]
-			datahold.append((np.degrees(np.arctan(s1))-np.degrees(np.arctan(s2))))
+			s2=np.polyfit(xpoke,ypoke,1)[0]
+
+			if (1+s1*s2)==0:
+				bodang=90
+			else:
+				bodang=np.arctan((s1-s2)/(1+s1*s2))
+				bodangdeg=np.degrees(bodang)
+
+			if side=='l':
+				if bodangdeg>=0:	
+					adjustang=180-bodangdeg
+				elif bodangdeg<0:
+					adjustang=abs(bodangdeg)
+				datahold.append(adjustang)
+				
+			elif side=='r':
+				if bodangdeg>=0:	
+					adjustang=bodangdeg
+				elif bodangdeg<0:
+					adjustang=180-abs(bodangdeg)
+				datahold.append(adjustang)
 		else:
 			datahold.append(np.nan)
 	return (datahold)
+
+#new function for getting distance of an activity path (9-8-22 - DSJ)
+def distancetraveled(data):
+	datahold=[]
+	for sample in range(len(data)):
+		trial=sample+1
+		xandydata=list(zip(data[trial]['x-implant'],data[trial]['y-implant']))
+		distance=0
+		if len(data[trial]['x-implant'])>1:
+			for point in range(len(xandydata)-1):
+				distance=distance+round(np.linalg.norm(np.array(xandydata[point]) - np.array((xandydata[point+1])),3))
+		else:
+			distance=np.nan
+		datahold.append(distance)
+	return(datahold)
 
 
 
