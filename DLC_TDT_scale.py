@@ -10,14 +10,25 @@
 from DLCvis import *
 from glob import glob
 from matplotlib import interactive
+import re
 interactive(True)
 
 
 
 #GET ALL THE SUBJECTS
 Subjects=glob('S*')
-Subjects=Subjects[0:8]
-#Subjects=Subjects
+
+Subjects=Subjects[0:2]+Subjects[3:5]+Subjects[7:11]#+[Subjects[-1]]
+Subjects=['S428_M', 'SC4M1_M', 'S3_M','SC4F1_F','S427_M', 'SC4F2_F', 'SC4M2_M','S17_M']
+
+Subjects=['SC4M1_M']
+
+
+#enter an individual subject here. if you dont want to look at just one then comment this out
+#Subjects=['S427_M']#'SC4M1_M', 'SC4F2_F']
+# Done: S18_F S20_M  S15_M SC4M1_M SC4F2_F
+# Todo:   SC4F1_F
+#subjectname = Subjects[0]
 
 
 
@@ -27,6 +38,7 @@ abortcountdf_all=pd.DataFrame()
 ######################################
 #DONT MESS WITH THIS
 SideDict={'S17_M':'r','S3_M':'l','S427_M':'l','S428_M':'r','S20_M':'r','S18_F':'l','SC4F1_F':'l','SC4F2_F':'r','SC4M1_M':'l','SC4M2_M':'r','S5_F':'l','S15_M':'l','S19_F':'r'}
+PreDict={'S17_M':'6','S3_M':'8','S427_M':'15','S428_M':'7','S20_M':'r','S18_F':'l','SC4F1_F':'7','SC4F2_F':'6','SC4M1_M':'7','SC4M2_M':'14','S5_F':'l','S15_M':'l','S19_F':'r'}
 
 #for loop to start iteerating through each subject
 for subjecta in Subjects:
@@ -37,8 +49,9 @@ for subjecta in Subjects:
 	#doesnt matter until we build in the neural data
 	OFCdata='y'
 	
-	# and for each subject find all the sessions (for now jsut the STSPre which is a shock day)
-	sessions=glob('STS*')+glob('STPr*')+glob('STE*')+glob('STN*')#?=ST*
+	# and for each subject find all the sessions 
+	#or comment out to pick a particular session
+	sessions=glob('STPr*')#+glob('STS1*')+glob('STE*')+glob('STN*')#?=ST*
 
 
 
@@ -61,14 +74,14 @@ for subjecta in Subjects:
 			tdtfile=tdtfile[0]
 			tdtdata = tdt.read_block(tdtfile)
 			camerastamps=tdtdata.epocs.Cam1.onset
-			if SideDict[subjectname]=='r':
+			if sidechoice=='r':
 				seekon=tdtdata.epocs.PC0_.onset
 				seekoff=tdtdata.epocs.PC0_.offset
-			elif SideDict[subjectname]=='l':	
+			elif sidechoice=='l':	
 				seekon=tdtdata.epocs.PC2_.onset
 				seekoff=tdtdata.epocs.PC2_.offset
 			seekstamps=list(map(list, zip(seekon, seekoff)))
-			itistamps=list(map(list,zip(seekon-15,seekon+2)))
+			itistamps=list(map(list,zip(seekon-10,seekon-1)))
 			pd.DataFrame(seekstamps).to_csv('tdtseek.csv')
 			pd.DataFrame(itistamps).to_csv('tdtiti.csv')	
 			savetxt('tdtcam.csv', camerastamps, delimiter=',')	
@@ -82,6 +95,25 @@ for subjecta in Subjects:
 		spd=sessarino
 		sex=subjecta.split('_')[1]
 		subjectname=subjecta
+		#check for subsessions
+		if spd[0:5] == 'STPre':
+			subsession=re.findall("\d+",spd)[0]
+			spd='STPre'
+			sessarino='STPre'
+		else:
+			subsession='1'
+
+
+		#check for pre
+		if spd=='STPre':
+			if PreDict[subjecta] == subsession:
+				pass
+			else:
+				os.chdir('../')
+				continue
+		else:
+			pass
+
 
 
 	#read the DLC csv
@@ -120,7 +152,8 @@ for subjecta in Subjects:
 			feederlocation=np.array((fxmean,fymean))
 
 			sTf=round(np.linalg.norm(np.array(seeklocation) - np.array(feederlocation)),2)	
-			normthresh=(sTf/12)*3.5
+			normthresh=(sTf/12)*1.5
+			freez_threshold=(sTf/12)*.25#.5=half inch
 			
 		elif SideDict[subjectname]=='r':
 			seeknpdata=np.asarray(data2[3:][:,19:22],dtype=float)
@@ -140,7 +173,8 @@ for subjecta in Subjects:
 			feederlocation=np.array((fxmean,fymean))	
 
 			sTf=round(np.linalg.norm(np.array(seeklocation) - np.array(feederlocation)),2)	
-			normthresh=(sTf/12)*3.5
+			normthresh=(sTf/12)*1.5
+			freez_threshold=(sTf/12)*.25#.5=half inch
 
 
 
@@ -183,20 +217,25 @@ for subjecta in Subjects:
 		aborts=seekdata[2]
 		abortthreshold=seekdata[3]
 		headatpoke=seekdata[4]
+		aborttimeREV=seekdata[5]
+		#sk_dist=distancetraveled(maindict)[0]
+		sk_immobcts=distancetraveled(maindict,velcut=freez_threshold)[1]
+		sk_immobcts=np.array(sk_immobcts)[:,0] # note this is is normalized to length of trial/number of samples, use the 0 column index for raw count of immobilitys or 1 for normalized to # of samples
+
 
 		# get iti data
-		itidata=parseDLCdata(bodydata,itiframelocations,camerastamps,threshold=.01,nosepokeloc=seeklocation)
+		itidata=parseDLCdata(bodydata,itiframelocations,camerastamps,threshold=.1,nosepokeloc=seeklocation)
 		itimaindict=itidata[0]
 		itidistancedict=itidata[1]
 		itiaborts=itidata[2]
-
-
 
 		# some other metrics
 		bodyangles=bodyangle(maindict,SL=seeklocation,TL=takelocation,side=sidechoice)
 		Tortuositydata=tortuosity(maindict)
 		finalapproachdata=findlastapproach(maindict,distancedict,minseek=abortthreshold)
-		itidist=distancetraveled(itimaindict)
+		itidist=distancetraveled(itimaindict)[0]
+		immobcts=distancetraveled(itimaindict,velcut=freez_threshold)[1]
+		immobcts=np.array(immobcts)[:,0]
 
 		#analyze the behavioral abort and final approach data
 		aborts=np.array(aborts)
@@ -204,8 +243,10 @@ for subjecta in Subjects:
 		newcol=[]
 
 		if sessarino == 'STS1B':
+			aborts[:,0]=aborts[:,0]+40
 			for item in trialnumbs.columns[1:]:
-				newcol=newcol+[trialnumbs.columns[item]+2]*trialnumbs[item][0]	
+				newcol=newcol+[trialnumbs.columns[item]]*trialnumbs[item][0]	
+				#
 				sessionout='STS1'
 		else:		
 			for item in trialnumbs.columns[1:]:
@@ -216,29 +257,35 @@ for subjecta in Subjects:
 
 		newcol=[]
 		newcol2=[]
+		newcol3=[]
 		for item in finalapproachdata:
 			newcol.append(finalapproachdata[item][1])
 			newcol2.append(finalapproachdata[item][0])
+			newcol3.append(finalapproachdata[item][2])
 		aborts_update=np.c_[aborts_update,newcol]
 		aborts_update=np.c_[aborts_update,newcol2]
 		aborts_update=np.c_[aborts_update,headatpoke]
 		aborts_update=np.c_[aborts_update,bodyangles]
 		aborts_update=np.c_[aborts_update,itidist]
-
+		aborts_update=np.c_[aborts_update,sk_immobcts]
+		aborts_update=np.c_[aborts_update,immobcts]
+		aborts_update=np.c_[aborts_update,newcol3]
 		# make a new DF with the analysis to writeout to csv
-		abortbyblock=pd.DataFrame(aborts_update).groupby(by=3).mean().drop(0,1).rename(columns={1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
-		sumbyblock=pd.DataFrame(aborts_update).groupby(by=3).sum().drop(0,1).rename(columns={1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
+		abortbyblock=pd.DataFrame(aborts_update).groupby(by=3).mean().drop(0,1).rename(columns={1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance',9:"sk_immoble",10:"iti_immoble",11:"final_vel"})
+		sumbyblock=pd.DataFrame(aborts_update).groupby(by=3).sum().drop(0,1).rename(columns={1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance',9:"sk_immoble",10:"iti_immoble",11:"final_vel"})
 
 
-		abortbyblock_all=pd.DataFrame(aborts_update).rename(columns={0:"Trial",1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
-		sumbyblock_all=pd.DataFrame(aborts_update).rename(columns={0:"Trial",1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance'})
+		abortbyblock_all=pd.DataFrame(aborts_update).rename(columns={0:"Trial",1: "Abort#", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance',9:"sk_immoble",10:"iti_immoble",11:"final_vel"})
+		sumbyblock_all=pd.DataFrame(aborts_update).rename(columns={0:"Trial",1: "Abort#(Sum)", 2: "abortTime",4:"FinalApprTime",5:"Tort",6:'Distatpoke',7:'BodyAngle',8:'ITIDistance',9:"sk_immoble",10:"iti_immoble",11:"final_vel"})
 		#kick in the subject and session
 		abortbyblock['Subject']=subjectname
 		abortbyblock['Session']=sessionout
+		abortbyblock['Subsession']=subsession
 		abortbyblock.insert(0, 'Abort#(Sum)', sumbyblock['Abort#(Sum)'])
 
 		abortbyblock_all['Subject']=subjectname
 		abortbyblock_all['Session']=sessionout
+		abortbyblock_all['Subsession']=subsession
 		abortbyblock_all.insert(0, 'Abort#(Sum)', sumbyblock_all['Abort#(Sum)'])
 
 
@@ -249,8 +296,8 @@ for subjecta in Subjects:
 
 
 #show plots if you want
-		showplot='True'
-		if showplot == 'Nah':
+		showplot='False'
+		if showplot == 'True':
 			figure, axes = plt.subplots() 
 			plot(seeknpdata[:,0],seeknpdata[:,1],'o')
 			plot(takenpdata[:,0],takenpdata[:,1],'o')
@@ -266,6 +313,20 @@ for subjecta in Subjects:
 			plt.show()
 		else: 
 			pass
+
+		ok
+#this dumps out the times of the aborts to be synched with TDT neural data. Note it ignores aborts that are within one second of each other....
+		aborttimeREV=pd.DataFrame(aborttimeREV)
+		mask=aborttimeREV[1].diff()>2
+		mask.loc[0] = True
+		aborttimeREV=aborttimeREV[mask]
+		aborttimeREV=aborttimeREV.reset_index().drop(columns='index')
+		aborttimeREV['Block']=decodetrials(trialnumbs,aborttimeREV)
+		aborttimeREV.rename(columns={0:'Trial',1:'Time',2:'Start_Time'}).to_csv('aborttimes.csv')
+
+
+		#traceplot(data = maindict, SL = seeklocation, TL = takelocation, saveplot=True)
+
 		os.chdir('../')
 	os.chdir('../')
 
@@ -282,8 +343,8 @@ abortcountdf_all.to_csv('abortdataalltrials.csv')
 # abortcountdf_all.reset_index(inplace=True).rename(columns={3:'Block'})
 
 def get_cmap(n, name='hsv'):
-    # Get spectrum of n unique colors
-    return plt.cm.get_cmap(name, n)
+	# Get spectrum of n unique colors
+	return plt.cm.get_cmap(name, n)
 
 # Generate plots for # aborts per block per subject"
 # Get data for subject
@@ -293,50 +354,51 @@ sess_names = abortcountdf['Session'].unique()
 blocks = abortcountdf['Block'].unique()
 cmap = get_cmap(len(sess_names), name='hsv')
 
-for sub in subs:
-	plt.figure()
-	plt.title(f"Subject {sub}: # of aborts per block by session")
-	this_sub = abortcountdf[abortcountdf['Subject'] == sub]
-	for i in range(len(sess_names)):
-		sess = sess_names[i]
-		sess_df = this_sub[this_sub['Session'] == sess]
-		# print()
-		# print(blocks)
-		# print(sess_df)
-		plt.plot(blocks, sess_df['Abort#(Sum)'], marker='o', color = cmap(i), label = sess)
-	plt.xlabel('Block')
-	plt.ylabel('# aborts')
-	plt.legend(loc = 'upper right')
-	plt.savefig(os.getcwd() + '\\' + sub + "\\session_aborts")
+# for sub in subs:
+# 	plt.figure()
+# 	plt.title(f"Subject {sub}: # of aborts per block by session")
+# 	this_sub = abortcountdf[abortcountdf['Subject'] == sub]
+# 	for i in range(len(sess_names)):
+# 		sess = sess_names[i]
+# 		sess_df = this_sub[this_sub['Session'] == sess]
+# 		# print()
+# 		# print(blocks)
+# 		# print(sess_df)
+# 		plt.plot(blocks, sess_df['Abort#(Sum)'], marker='o', color = cmap(i), label = sess)
+# 	plt.xlabel('Block')
+# 	plt.ylabel('# aborts')
+# 	plt.legend(loc = 'upper right')
+# 	plt.savefig(os.getcwd() + '\\' + sub + "\\session_aborts")
 
-# Gen plots for avg number aborts per block across subjects w/ error
-grouped = abortcountdf.groupby(['Session', 'Block']).agg({'Abort#(Sum)': ['mean', 'sem']}) # Has multiindex = ('Session', "Block")
+# # Gen plots for avg number aborts per block across subjects w/ error
+# grouped = abortcountdf.groupby(['Session', 'Block']).agg({'Abort#(Sum)': ['mean', 'sem']}) # Has multiindex = ('Session', "Block")
 
-plt.figure()
+# plt.figure()
 
-#sess_index = grouped.index.get_level_values('Session')
-cmap = get_cmap(len(sess_names), name='hsv')
-for i in range(len(sessions)):
-	sess = sessions[i]
-	sess_data = grouped.loc[sess,] # get data for this session
-	blocks = list(sess_data['Abort#(Sum)']['mean'].index)
-	plt.plot(blocks, sess_data['Abort#(Sum)']['mean'], marker='o', markersize=7, color = cmap(i), label = sess)
-	plt.errorbar(x = sess_data.index, 
-		y = sess_data['Abort#(Sum)']['mean'], 
-		yerr = sess_data['Abort#(Sum)']['sem'], 
-		color = cmap(i),
-		capsize = 3)
-	# axes = plt.gca()
-	# axes.set_ylim(bottom=0)
-# 	plt.savefig(os.getcwd() + '\\' + sess +"_avg_aborts_by_block")
-axes = plt.gca()
-axes.set_ylim(bottom=0)
-plt.legend(loc = 'upper right')
-# plt.show()
+# #sess_index = grouped.index.get_level_values('Session')
+# cmap = get_cmap(len(sess_names), name='hsv')
+# for i in range(len(sessions)):
+# 	sess = sessions[i]
+# 	sess_data = grouped.loc[sess,] # get data for this session
+# 	blocks = list(sess_data['Abort#(Sum)']['mean'].index)
+# 	plt.plot(blocks, sess_data['Abort#(Sum)']['mean'], marker='o', markersize=7, color = cmap(i), label = sess)
+# 	plt.errorbar(x = sess_data.index, 
+# 		y = sess_data['Abort#(Sum)']['mean'], 
+# 		yerr = sess_data['Abort#(Sum)']['sem'], 
+# 		color = cmap(i),
+# 		capsize = 3)
+# 	# axes = plt.gca()
+# 	# axes.set_ylim(bottom=0)
+# # 	plt.savefig(os.getcwd() + '\\' + sess +"_avg_aborts_by_block")
+# axes = plt.gca()
+# axes.set_ylim(bottom=0)
+# plt.legend(loc = 'upper right')
+# # plt.show()
 
 
-for i, (X, Y) in enumerate(data):
-   scatter(X, Y, c=cmap(i))
+# for i, (X, Y) in enumerate(data):
+#    scatter(X, Y, c=cmap(i))
+
 
 
 
