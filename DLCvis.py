@@ -17,6 +17,10 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 	secondsdict={}
 	dfforjandro=[]
 	distanceatend=[]
+
+	abortcamtime=[]
+
+
 	location=-1
 	maxlength=0
 
@@ -49,7 +53,7 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 
 
 		#concat all of it
-		concatarray=np.column_stack((secondsnorm,IMactivitydatax,IMactivitydatay,IMactivityliklihood,LEactivitydatax,LEactivitydatay,LEactivityliklihood,REactivitydatax,REactivitydatay,REactivityliklihood,BDactivitydatax,BDactivitydatay,BDactivityliklihood,TBactivitydatax,TBactivitydatay,TBactivityliklihood))
+		concatarray=np.column_stack((secondsnorm,IMactivitydatax,IMactivitydatay,IMactivityliklihood,LEactivitydatax,LEactivitydatay,LEactivityliklihood,REactivitydatax,REactivitydatay,REactivityliklihood,BDactivitydatax,BDactivitydatay,BDactivityliklihood,TBactivitydatax,TBactivitydatay,TBactivityliklihood,seconds))
 		concatarray=concatarray[concatarray[:,3]>threshold]
 
 		# get trial number
@@ -71,7 +75,8 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 		 'p-body':concatarray[:,12],
 		 'x-tailbase':concatarray[:,13],
 		 'y-tailbase':concatarray[:,14],
-		 'p-tailbase':concatarray[:,15]}})
+		 'p-tailbase':concatarray[:,15],
+		 'seconds(non-norm)':concatarray[:,16]}})
 
 
 		#drop out the 'fast' trials to be calulated as NANs
@@ -92,7 +97,8 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 				 'p-body':np.array([]),
 				 'x-tailbase':np.array([]),
 				 'y-tailbase':np.array([]),
-				 'p-tailbase':np.array([])}})				
+				 'p-tailbase':np.array([]),
+				 'seconds(non-norm)':np.array([])}})				
 
 
 		else:
@@ -136,6 +142,7 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 			if distancedict[trial][spot] <=min_closeness and trip==0:
 				trip=1
 				entersample=masterdict[trial]['seconds'][spot]
+				enterrawtime=masterdict[trial]['seconds(non-norm)'][spot]
 				spot=spot+1
 
 			elif distancedict[trial][spot] <= min_closeness and trip==1:
@@ -143,6 +150,12 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 			elif distancedict[trial][spot] > min_closeness and trip==1:
 				abortcount=abortcount+1
 				aborttime.append(masterdict[trial]['seconds'][spot]-entersample)
+
+				#get the raw time to backtrack to tdt trace (dsj 10/11/22)
+				rawtime=masterdict[trial]['seconds(non-norm)'][spot]
+				abortcamtime.append([trial,rawtime,enterrawtime])
+
+				#carry on....
 				trip=0
 				spot=spot+1
 
@@ -161,7 +174,7 @@ def parseDLCdata(dataset,locations,cameratimes,threshold=0.01,abort_threshold=50
 		abortlist.append([trial,abortcount,mean(aborttime)])
 
 
-	return (masterdict,distancedict,abortlist,min_closeness,distanceatend)
+	return (masterdict,distancedict,abortlist,min_closeness,distanceatend,abortcamtime)
 
 
 #UPDATED note this uses the angle WHEN the nosepoke happens
@@ -219,19 +232,45 @@ def bodyangle(data,SL,TL,side='l'):
 	return (datahold)
 
 #new function for getting distance of an activity path (9-8-22 - DSJ)
-def distancetraveled(data):
+#working on addidng freezing
+def distancetraveled(data,velcut=1):
 	datahold=[]
+	immobhold=[]
+	
 	for sample in range(len(data)):
 		trial=sample+1
 		xandydata=list(zip(data[trial]['x-implant'],data[trial]['y-implant']))
+		time=list(zip(data[trial]['seconds']))
 		distance=0
+		immobcount=0
+		#allv=[]
 		if len(data[trial]['x-implant'])>1:
 			for point in range(len(xandydata)-1):
 				distance=distance+round(np.linalg.norm(np.array(xandydata[point]) - np.array((xandydata[point+1])),3))
+				point_dis=round(np.linalg.norm(np.array(xandydata[point]) - np.array((xandydata[point+1])),3))
+				point_time=np.array(time[point+1]) - np.array(time[point])[0]
+				velocity=point_dis/point_time
+				#allv.append(velocity[0])
+				trialsamps=len(xandydata)
+
+				if velocity <= velcut:
+					#going to go with total immobile counts b/c of mdropped data from rearing/bad tracking
+					immobcount=immobcount+1
+				else:
+					pass
+		
+		elif len(data[trial]['x-implant'])==1:
+			distance=np.nan
+			immobcount=0
+			trialsamps=1
 		else:
 			distance=np.nan
+			immobcount=np.nan
+			trialsamps=np.nan
+
 		datahold.append(distance)
-	return(datahold)
+		immobhold.append([immobcount,immobcount/trialsamps])
+	return(datahold,immobhold)
 
 
 
@@ -295,6 +334,7 @@ def findlastapproach(data,distancedata,minseek):
 			ypoints=data[trial]['y-implant']
 			lengthofapproach=np.nan#data[trial]['seconds']
 			approachtor=np.nan
+			vel=np.nan
 
 		elif len(np.where(distancedata[trial]>minseek)[0])==0: # if they are only in the zone
 			startfinal=0
@@ -304,9 +344,13 @@ def findlastapproach(data,distancedata,minseek):
 			if len(secs) >1:
 				lengthofapproach=secs[-1]-secs[0]
 				approachtor=tortuosity2(xpoints,ypoints)
+				distancetrav=sum(abs(np.diff(distancedata[trial][startfinal:])))
+				vel=distancetrav/lengthofapproach
 			elif len(secs) ==1:
-				lengthofapproach=.05 #i.e one camera sample at 20 hz
+				lengthofapproach=.06#i.e one camera sample at 16 hz
 				approachtor=np.nan			#print(trial,startfinal)
+				distancetrav=sum(abs(np.diff(distancedata[trial][startfinal-1:])))
+				vel=distancetrav/lengthofapproach	
 
 		elif np.where(distancedata[trial]>minseek)[0][-1]+1==len(data[trial]['seconds']): # if they dont finish near the zone (incomplete trial)
 			startfinal=0
@@ -314,6 +358,7 @@ def findlastapproach(data,distancedata,minseek):
 			ypoints=data[trial]['y-implant'][startfinal:]
 			lengthofapproach=np.nan#data[trial]['seconds'][startfinal:]
 			approachtor=np.nan
+			vel=np.nan
 
 		else:			# if they enter the zone from outside
 			startfinal=np.where(distancedata[trial]>minseek)[0][-1]+1
@@ -323,14 +368,17 @@ def findlastapproach(data,distancedata,minseek):
 			if len(secs) >1:
 				lengthofapproach=secs[-1]-secs[0]
 				approachtor=tortuosity2(xpoints,ypoints)
+				distancetrav=sum(abs(np.diff(distancedata[trial][startfinal:])))
+				vel=distancetrav/lengthofapproach
 			elif len(secs) ==1:
-				lengthofapproach=.05 #i.e one camera sample at 20 hz
+				lengthofapproach=.06 #i.e one camera sample at 16 hz
 				approachtor=np.nan			#print(trial,startfinal)
-		
+				distancetrav=sum(abs(np.diff(distancedata[trial][startfinal-1:])))
+				vel=distancetrav/lengthofapproach	
 
 		
 		#addvellocty here
-		both=np.array([approachtor,lengthofapproach])
+		both=np.array([approachtor,lengthofapproach,vel])
 		tempdict.update({trial:both})
 	return(tempdict)
 
@@ -367,9 +415,26 @@ def dicttolist(dicti,columns=1):
 
 
 
+#function added so that trial numbres are turned into corresponding block (10/11/22-dsj). input is the trial number file
 
+def decodetrials(tdata,abortdata):
+	outlist=[]
 
+	b1=tdata[1][0]
+	b2=tdata[1][0]+tdata[2][0]
+	b3=tdata[1][0]+tdata[2][0]+tdata[3][0]
+	b4=tdata[1][0]+tdata[2][0]+tdata[3][0]+tdata[4][0]
 
+	for item in range(len(abortdata)): 
+		if abortdata[0][item] <= b1:
+			outlist.append(1)
+		elif abortdata[0][item] > b1 and abortdata[0][item] <= b2:
+			outlist.append(2)
+		elif abortdata[0][item] > b2 and abortdata[0][item] <= b3:
+			outlist.append(3)
+		elif abortdata[0][item] > b3 and abortdata[0][item] <= b4:
+			outlist.append(4)
+	return (outlist)
 
 
 
@@ -390,6 +455,9 @@ def aniplot(trial,data,SL,savefile=False,filename='test.gif', markers=True):
 	x = data[trial]['x-implant']#np.arange(1,len(x_activitydict[trial])+1,1)   secondsdict[trial]
 	y = data[trial]['y-implant']
 
+	#x = np.arange(1,len(data[trial])+1,1)
+	#y = data[trial]
+
 	fig, ax = plt.subplots()
 	line, = ax.plot(x, y, color='k')
 	#line2, = ax.plot(x_bodyactivitydict[trial], y_bodyactivitydict[trial], color='r')
@@ -397,7 +465,7 @@ def aniplot(trial,data,SL,savefile=False,filename='test.gif', markers=True):
 	def update(num, x, y, line):
 		line.set_data(x[:num], y[:num])
 
-		line.axes.axis([0, 640,480,0])
+		line.axes.axis([0, 640,480,0]) # flip axes?
 		return line,
 
 
@@ -405,8 +473,8 @@ def aniplot(trial,data,SL,savefile=False,filename='test.gif', markers=True):
 	
 	if markers == True:
 		plt.plot(SL[0],SL[1],'r*')
-		plt.plot(37,365,'mo')
-		plt.plot(627,167,'bo')
+		#plt.plot(37,365,'mo')
+		#plt.plot(627,167,'bo')
 		plt.plot(data[trial]['x-implant'][1],data[trial]['y-implant'][1],'sg')
 		plt.plot(data[trial]['x-implant'][-1],data[trial]['y-implant'][-1],'sr')
 	else:
@@ -418,7 +486,7 @@ def aniplot(trial,data,SL,savefile=False,filename='test.gif', markers=True):
 	plt.show()
 
 # traceplot(masterdict) UPDATED
-def traceplot(data,SL,TL,xdata2=None,ydata2=None,xdata3=None,ydata3=None):
+def traceplot(data,SL,TL,xdata2=None,ydata2=None,xdata3=None,ydata3=None,saveplot=False, savefile=False, savedir=None):
 	fig, axs = plt.subplots(8,10,sharex=True,sharey=True)
 	for a in range(0,len(data)):
 		if a > 9 and a <20:
@@ -466,9 +534,11 @@ def traceplot(data,SL,TL,xdata2=None,ydata2=None,xdata3=None,ydata3=None):
 		#axs[rowspot,colspot].plot(xdata[a+1][0],ydata[a+1][0],'sg')
 		#axs[rowspot,colspot].plot(xdata[a+1][-1],ydata[a+1][-1],'sr')
 
-
 	plt.xlim(0, 640)
 	plt.ylim(480,0)
+
+	if saveplot:
+		plt.savefig(os.getcwd() + '\\traceplot')
 
 	plt.show()
 
