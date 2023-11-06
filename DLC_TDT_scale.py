@@ -21,7 +21,7 @@ Subjects=glob('S*')
 Subjects=Subjects[0:2]+Subjects[3:5]+Subjects[7:11]#+[Subjects[-1]]
 Subjects=['S428_M', 'SC4M1_M', 'S3_M','SC4F1_F','S427_M', 'SC4F2_F', 'SC4M2_M','S17_M']
 
-Subjects=['SC4M1_M']
+#Subjects=['SC4M1_M']
 
 
 #enter an individual subject here. if you dont want to look at just one then comment this out
@@ -51,7 +51,7 @@ for subjecta in Subjects:
 	
 	# and for each subject find all the sessions 
 	#or comment out to pick a particular session
-	sessions=glob('STPr*')#+glob('STS1*')+glob('STE*')+glob('STN*')#?=ST*
+	sessions=glob('STPr*')+glob('STS1*')+glob('STE*')+glob('STN*')#?=ST*
 
 
 
@@ -152,8 +152,8 @@ for subjecta in Subjects:
 			feederlocation=np.array((fxmean,fymean))
 
 			sTf=round(np.linalg.norm(np.array(seeklocation) - np.array(feederlocation)),2)	
-			normthresh=(sTf/12)*1.5
-			freez_threshold=(sTf/12)*.25#.5=half inch
+			normthresh=(sTf/12)*2
+			freez_threshold=(sTf/12)*.5#.5=half inch
 			
 		elif SideDict[subjectname]=='r':
 			seeknpdata=np.asarray(data2[3:][:,19:22],dtype=float)
@@ -173,8 +173,8 @@ for subjecta in Subjects:
 			feederlocation=np.array((fxmean,fymean))	
 
 			sTf=round(np.linalg.norm(np.array(seeklocation) - np.array(feederlocation)),2)	
-			normthresh=(sTf/12)*1.5
-			freez_threshold=(sTf/12)*.25#.5=half inch
+			normthresh=(sTf/12)*2
+			freez_threshold=(sTf/12)*.5#.5=half inch
 
 
 
@@ -314,7 +314,7 @@ for subjecta in Subjects:
 		else: 
 			pass
 
-		ok
+
 #this dumps out the times of the aborts to be synched with TDT neural data. Note it ignores aborts that are within one second of each other....
 		aborttimeREV=pd.DataFrame(aborttimeREV)
 		mask=aborttimeREV[1].diff()>2
