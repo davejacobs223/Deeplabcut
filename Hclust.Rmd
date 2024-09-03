@@ -1,0 +1,398 @@
+---
+title: "YAY Community Detection"
+author: "Dave Jacobs"
+date: "7/30/2019"
+output: 
+  html_document:
+    toc: true
+    theme: flatly
+---
+
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(reshape2)
+#library(tidygraph)
+#library(ggraph)
+#library(corrr)
+#library(ggrepel)
+library(factoextra)
+library(FactoMineR)
+library(rgl)
+library(ggridges)
+```
+
+
+```{r, include=FALSE,warning=FALSE}
+getwd()
+#set this to where the file is/or file name
+#CorrStuff<-read.csv("ForCorrBLSub.csv",row.names=1)
+CorrStuff2<-read.csv("somemetrics3.csv")
+#OldData<-read.csv("80_30Split.csv",row.names=1)
+
+CorrStuff2=CorrStuff2 %>%  select(-c(X,Rat))%>% slice(-c(121))
+
+Corrnorm<-CorrStuff2 %>% mutate(SeekTort = (SeekTort - mean(SeekTort)) / sd(SeekTort)) %>% mutate(Angles = (Angles - mean(Angles)) / sd(Angles)) %>% mutate(FinalApTort = (FinalApTort - mean(FinalApTort)) / sd(FinalApTort)) %>% mutate(FinalAplength = (FinalAplength - mean(FinalAplength)) / sd(FinalAplength))%>% mutate(ITITort = (ITITort - mean(ITITort)) / sd(ITITort))%>% mutate(AbortLat = (AbortLat - mean(AbortLat)) / sd(AbortLat)) %>% select(-c()) #%>% slice(-c(121))#%>% mutate(SL = (SL - mean(SL)) / sd(SL))
+
+
+longertrials<-CorrStuff2 %>% filter(SL <4) %>% select(-c(SL))
+#This is for if you already have a correlation or covariance matrix
+#finally fucking figured out how to get external corr matrixes into corrr acceptable df
+
+
+```
+
+# Correlate and Filter
+
+Will use Pearson method unless told otherwise. Minimum correlation value can be changes in filter.
+```{r cars, warning=FALSE}
+
+#NOTE that the correlate is commented out. This must be done if you already have the correlation matrix and read it in from python, baser, w/e
+
+
+res.cor2 <- Corrnorm %>%  # (1)
+  t() %>% correlate() %>%           # (2)
+  shave(upper = TRUE) %>%            # (3)
+  stretch(na.rm = TRUE) %>%          # (4)
+  filter(r >= .95) 
+
+
+
+```
+
+## Edge totals
+```{r,}
+
+Filetwo=nrow(res.cor2)
+Filetwo
+```
+# Plots
+
+## Some Prelim Network plots based on correlations
+
+```{r bob, echo=FALSE,warning=FALSE}
+#Makes the graph 
+
+
+set.seed(1)
+cor.graph2 <- as_tbl_graph(res.cor2, directed = FALSE)
+ggraph(cor.graph2) + 
+  geom_edge_link() + 
+  geom_node_point() +
+  geom_node_text(
+    aes(label = name), size = 3, repel = TRUE
+  ) +
+  theme_graph()
+
+cor.graph2<-cor.graph2 %>% mutate(group = case_when(grepl("ad", name) ~ "ADQ",
+                                        grepl("swt", name) ~"Swt",
+                      grepl("def", name) ~"Def"))
+```
+
+## Another plot depicting centrality 
+
+This measures how many connections one node has with another node.
+```{r sue, echo=FALSE,warning=FALSE}
+#A centrality plot. Note: you dont need to run this, but it will give you a good idea of community detection results cause community detection uses centrality to sort unless otherwise specified. 
+set.seed(123)
+cor.graph2 %>%
+  activate(nodes) %>%
+  mutate(centrality = centrality_authority()) %>% 
+  ggraph(layout = "graphopt") + 
+  geom_edge_link(width = 1, colour = "lightgray") +
+  geom_node_point(aes(size = centrality, colour = centrality)) +
+  #geom_node_text(aes(label = name), repel = TRUE)+
+  scale_color_gradient(low = "yellow", high = "red")+
+  theme_graph()
+```
+
+
+
+# Communities based on infomap's algorithms 
+
+
+
+## One for the second input file
+```{r,echo=FALSE,warning=FALSE}
+set.seed(123)
+cor.graph2 %>%
+  activate(nodes) %>%
+  mutate(community = as.factor(group_infomap())) %>% 
+  ggraph(layout = "graphopt") + 
+  geom_edge_link(width = 0.01, colour = "black") +
+  geom_node_point(aes(colour = community),size = 3) +#aes(colour = community,shape=group)
+  #scale_color_manual(values=c("red", "blue", "darkgreen","purple","grey","black"))+
+  #geom_node_text(aes(label = name), repel = TRUE)+
+  theme_graph()
+#ggsave('bb.png')
+```
+
+
+
+#pca with hierarchical
+```{r}
+getwd()
+sessionorder=c("STNS","STS1","STPre","STE1","STE2")
+rankorder<-c('SC4M2_M','S17_M','S427_M','S3_M','SC4M1_M','SC4F1_F','S428_M','SC4F2_F')
+Behdata=read.csv('ExtinctionAnalysis/trialdataCB.csv') #%>% select(-abortTime) %>% na.omit()
+DLCdata=read.csv('ExtinctionAnalysis/abortdataalltrials-fz2.csv') #%>% select(-abortTime) #%>% filter(FinalApprTime>.06)
+both=merge(Behdata,DLCdata, by=c('Session','Trial','Subject','Subsession')) %>% select(-c('X.y','index','Block.y','Abort..Sum.','Distatpoke'))
+breaktrials=Behdata %>% filter(is.na(FL))%>% select(Session,Subject,Subsession,Block,Trial,FPtrial,SL)
+colnames(breaktrials)[4]<-'Block.x'
+breaktrials$clust=as.factor(5)
+
+both=both %>% mutate(Tort=case_when(is.na(Tort) & FinalApprTime < .1 ~ 1, Tort != is.na(Tort) ~ Tort )) %>% mutate(abortTime=case_when(is.na(abortTime) ~ 0, abortTime != is.na(abortTime) ~ abortTime ))#%>%filter(Session!=c('STNS'))
+# add group average for nans
+both=both %>% mutate(across(FinalApprTime, ~replace_na(., mean(., na.rm=TRUE))))
+
+Corrnorm=cbind(both[1:4],both[7:23])  %>% select(-c(Tort)) %>% na.omit() #%>%filter(Block.x !=c(1))
+Corrnorm=Corrnorm%>% filter(Block.x != 1 | Session != 'STNS')
+  
+Corrnorm$Session = factor(Corrnorm$Session, levels=c('STNS','STS1','STPre','STE1','STE2'))
+Corrnorm$Subject = factor(Corrnorm$Subject, levels=rankorder)
+
+Corrnorm=Corrnorm %>% mutate(normfrz=((sk_immoble*.06)/SL)*100) #%>% mutate(Abort.=Abort./SL) %>% mutate(DP.take.=DP.take./SL) %>% mutate(PM=PM/SL)
+```
+
+```{r}
+#test.pca <- PCA(cbind(both[1],both[7:9]),quali.sup = 1, graph = TRUE)2,4,5,6,7,8,9,10,11,13,17,18,19,20,21 # 20 is the iti activity
+test.pca <- PCA(Corrnorm,ncp=3,quali.sup = c(1,3,4),quanti.sup = c(2,4,5,6,7,8,9,10,11,17,18,19,20,21), scale.unit=TRUE,graph = TRUE) #2,4,5,6,7,8,14
+test.pca$eig
+fviz_pca_var(test.pca, col.var = "contrib", gradient.cols = c('grey50','#55a3cd', '#323a3f')) #raise:include the ITI stuff?
+res.hcpc <- HCPC(test.pca,nb.clust=4)#-1
+#dimdesc(test.pca, axes=c(1,2))
+plot(res.hcpc,t.level = 'centers',ind.names='False',choice='map',centers.plot = 'True')
+
+colors <- c('#4954b0','#9c2f45')
+
+
+pcdf=as.data.frame(test.pca$ind$coord)
+rerun=as.tibble(res.hcpc$data.clust)
+pcdf=as.tibble(pcdf)
+rerun23=rerun %>% filter(clust == 2 | clust == 4 ) %>% select(-clust)
+og=rerun %>% filter(clust == 3| clust == 1 |clust == 5)
+CID=res.hcpc$data.clust$clust
+CID=as.data.frame(CID) 
+pcdf$clust=CID$CID
+pcdf=pcdf %>%  mutate_at(4, as.integer)
+#pcdf=pcdf %>%  mutate(clust=case_when(clust < 2 ~ 'Apr', clust >=2 ~ 'CFL'))
+pcdf$color <- colors[ as.numeric( as.factor(pcdf$clust) ) ]
+
+
+plot3d( 
+ x=pcdf$Dim.1, y=pcdf$Dim.2, z=pcdf$Dim.3, 
+ col = pcdf$color, 
+type = 's', 
+radius = .3,
+ xlim=c(-5,10),
+xlab="P1", ylab="P2", zlab="P3")
+```
+
+```{r}
+fviz_cluster(res.hcpc,
+             repel = TRUE,            # Avoid label overlapping
+             show.clust.cent = TRUE, # Show cluster centers
+             palette = c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'),  
+             # Color palette see ?ggpubr::ggpar
+             ggtheme = theme_classic(),
+             main = "Factor map",
+             )
+```
+
+```{r}
+#rerun the pcs on clusters2-3
+test.pca <- PCA(rerun23,ncp=6,quali.sup = c(1,3,4),quanti.sup = c(2,4,5,6,7,8,9,10,13,14,17,18,20), scale.unit=TRUE,graph = TRUE) #2,4,5,6,7,8,14
+test.pca$eig
+fviz_pca_var(test.pca, col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")) 
+res.hcpc <- HCPC(test.pca,nb.clust=2)
+#dimdesc(test.pca, axes=c(1,2))
+plot(res.hcpc,t.level = 'centers',ind.names='False',choice='map',centers.plot = 'True')
+
+rerun2_3=as.tibble(res.hcpc$data.clust) 
+rerun2_3=rerun2_3 %>% mutate_at(22, as.integer)%>% mutate(clust=case_when(clust == 2 ~ 4,clust == 1 ~ 2 ))%>% mutate_at(22, as.factor)
+                                                   
+                                                   
+                                                   
+fviz_cluster(res.hcpc,
+             repel = TRUE,            # Avoid label overlapping
+             show.clust.cent = TRUE, # Show cluster centers
+             palette = "jco",         # Color palette see ?ggpubr::ggpar
+             ggtheme = theme_minimal(),
+             main = "Factor map"
+             )
+```
+
+
+```{r}
+partitioned=res.hcpc$data.clust#rbind(og,rerun2_3)#
+
+partitioned=partitioned %>% filter(clust!=6)#%>% mutate(clust=case_when(clust == 5 ~ 3, clust !=5 ~ as.numeric(as.character(clust)))) %>%   mutate_at(vars(clust), funs(factor))
+
+sansout=partitioned %>% filter(clust!=4)%>% select(-clust)
+
+partitioned2=partitioned %>% select(-c(Session,Subject))# %>% rename(Seek_Latency = SL,Premature = PM,Displacement = DP.take., Displacement-Food - DP.food.,Aborts = Abort. ,     Final_Approach =  FinalApprTime)
+
+partitioned2=partitioned2 %>% mutate(clust=case_when(clust == 6 ~ 5, clust !=6 ~ as.numeric(as.character(clust)))) %>%   mutate_at(vars(clust), funs(factor)) %>% select(-c('Trial','Block.x','FPtrial'))
+
+part_long=partitioned2 %>% melt(id.vars=c("clust"))%>% as_tibble() #%>% rename("Risk"=variable,"Pellets"=value)
+
+means<-part_long %>% group_by(clust,variable) %>% summarise(Mean = mean(value),n=n(),sds=(sd(value)/sqrt(n)))
+
+ggplot(data=means, aes(x=clust, y=Mean)) +
+  geom_bar(aes(fill=clust),stat="identity")+scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+
+  geom_errorbar( aes(x=clust, ymin=Mean-sds, ymax=Mean+sds), width=0.2, colour="black", alpha=0.9, size=0.75)+theme_classic()+theme(aspect.ratio=1,strip.background = element_blank())+
+  facet_wrap(~variable,scales="free_y",nrow=2)
+
+ggsave('clusts.png',dpi=300)
+
+ggplot(data=partitioned, aes(x=clust)) +
+  geom_boxplot(aes(fill=clust))+scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))
+
+ggplot(partitioned, aes(x=FinalApprTime,y = clust,fill=clust,color=clust)) +
+     geom_density_ridges(scale=4,point_color='black',jittered_points = TRUE)+
+  scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+
+  scale_color_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+
+    theme_ridges(grid = FALSE)+facet_wrap(~Subject)#+xlim(0,60)
+   #theme_void()+
+ 
+
+ggplot(data=part_long, aes(x=clust,fill=clust)) +
+  geom_boxplot()+scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+
+  theme_classic()+theme(aspect.ratio=1,strip.background = element_blank())+
+  facet_wrap(~variable,scales="free_y",nrow=2)
+
+```
+```{r}
+
+sessionorder<-c('No Shock','Session 1','PRT Learned','Extinction 1','Extinction 2')
+rankorder2<-c('SC4F1_F','SC4F2_F','SC4M1_M','S427_M','S3_M','S428_M','S17_M','SC4M2_M')
+
+
+
+
+partitioned3 <- partitioned %>% mutate(Session=case_when(Session== 'STS1'~'Session 1',Session== 'STPre'~'PRT Learned',Session== 'STE1'~'Extinction 1',Session== 'STE2'~'Extinction 2',Session=='STNS'~'No Shock'))
+
+partitioned3$Session = factor(partitioned3$Session, levels=sessionorder)
+partitioned3=partitioned3%>% group_by(Session)%>% count(clust) %>% mutate(perc = n / sum(n)*100)
+
+ggplot(partitioned3,aes(x=Session,y=perc))+geom_bar(stat = "identity")+facet_wrap(~clust,scales="free",nrow=1)+theme_classic()
+ggsave('blocks.png')
+
+ggplot(partitioned3,aes(x=Session,y=perc,fill=clust))+geom_bar(stat = "identity")+ scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+theme_classic()+xlab('Block')+ylab('Count')+theme(aspect.ratio=2,strip.background = element_blank())+facet_wrap(~Session,scales="free",nrow=1)
+
+
+clustdata= partitioned %>% select(Subject,Session,clust) %>% mutate(Session=case_when(Session== 'STS1'~'Session 1',Session== 'STPre'~'PRT Learned',Session== 'STE1'~'Extinction 1',Session== 'STE2'~'Extinction 2'))
+
+clustdata=clustdata %>% group_by(Session,Subject)%>% count(clust) %>% mutate(perc = n / sum(n)*100)
+
+
+clustdata$Subject = factor(clustdata$Subject, levels=rankorder2)
+
+
+ggplot(clustdata,aes(x=Subject,y=perc,fill=clust))+geom_bar(stat = "identity")+
+  scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+
+  facet_wrap(~Session,nrow=1)+theme_classic() + theme(strip.background = element_blank(),axis.text.x = element_text(angle = 90,vjust=.75))
+
+
+
+ggplot(clustdata,aes(x=Subject,y=perc,fill=clust))+geom_bar(stat = "identity")+
+  scale_fill_manual(values=c( 'grey50','#55a3cd', '#323a3f','#9c2f45','black','green'))+
+  facet_wrap(~Session,nrow=1)+theme_classic() + theme(axis.text.x = element_text(angle = 90,vjust=.5))
+```
+```{r}
+getwd()
+#FPdata=read.csv('AllActionTrials.csv')
+partitioned$Subsession=factor(partitioned$Subsession)
+subtypes_out=partitioned %>% select(Session,Subject,Subsession,Block.x,Trial,FPtrial,SL,clust)
+write.csv(subtypes_out,"subtypes.csv")
+```
+
+```{r}
+data3=partitioned %>%filter(Session=='STPre') %>% select(c(Subject,Block.x,SL,TL,FL,PM,DP.take.,DP.food.,Abort.,FinalApprTime,normfrz,clust))
+
+data3$clust= as.numeric(data3$clust)
+data3=data3 %>% filter(clust==3) #%>% filter(Block.x==1)
+
+
+#data3=data3 %>% mutate(Cluster=case_when(clust<3 ~ 1,clust>2~2))
+
+#data3norm=scale(data3[1:8]) %>% as.data.frame()
+#data3norm$Cluster=as.factor(data3$Cluster)
+```
+
+```{r}
+library(MASS)
+vals=c()
+samples=100
+
+for (i in 1:40){
+  train3=data3norm %>% filter(Cluster=='2') %>% sample_n(samples)
+  train1=data3norm %>% filter(Cluster=='1') %>% sample_n(samples)
+  train=rbind(train1,train3)
+  #train=transform(train, Cluster = sample(Cluster))
+  #trainshuf=transform( train, Cluster = sample(Cluster))
+  #lda.fitCV<-lda(Cluster~Pre*Post*tPre*tPost*Food,CV=TRUE,data=train)
+  lda.fitCV<-lda(Cluster~PM+Abort.+FinalApprTime+DP.take.,CV=TRUE,data=train)
+  
+  a=table(train$Cluster, lda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+  acc=(a[4]+a[1])/(samples*2)
+  vals=c(vals,acc)
+}
+vals
+mean(vals)
+sd(vals)
+
+glm.fits<-glm(SL~PM+Abort.+FinalApprTime+DP.take.,data=data3norm)
+summary(glm.fits)
+```
+
+```{r}
+m1=subtypes_out %>% filter(Subject == 'SC4F1_F')
+ggplot(m1,aes(x=Trial,y=clust))+geom_point()+facet_wrap(~Session,nrow=1)
+```
+```{r}
+library(GGally)
+raddata2=raddata %>% filter(clust!=4)%>% group_by(clust) %>% summarise_all(mean)
+ggparcoord(raddata2,
+    columns = 2:8, groupColumn = 1, order = "anyClass",
+    showPoints = TRUE, 
+    title = "Parallel Coordinate Plot for the Iris Data",
+    alphaLines = 0.3
+    ) + 
+  scale_color_viridis(discrete=TRUE) +
+  theme_classic()+
+  theme(
+    plot.title = element_text(size=10)
+  )
+
+```
+```{r}
+
+
+raddata2=raddata %>% filter(clust==1 | clust ==2)%>% group_by(clust) %>% summarise_all(mean)
+raddata2=as.data.frame(raddata2)
+rownames(raddata2) <- raddata2$clust
+raddata2=subset(raddata2,select=-c(clust,BodyAngle,TL,FL))
+col_order <- c("SL", "ITIDistance", "PM",
+               "DP.take.", "DP.food.","Abort.","FinalApprTime")
+raddata2 <- raddata2[, col_order]
+
+titles <- c("Cluster 1", "Cluster 2", "Cluster 3")
+car_colors=c( '#4954b0','#55a3cd', '#e96f36','#9c2f45')
+
+
+
+radarchart(
+  df = raddata2,
+  maxmin = FALSE,  # Do we want the function to calculate minimums and maximums? If yes, we set false
+  cglty = 1, 
+  pcol = car_colors, # Line type for radar grids
+  cglcol = "gray", # Line color for radar grids
+  plwd = 3,        # Line Widths for variables
+  plty = 1, 
+  cex=.1,
+  pfcol = scales::alpha(car_colors, alpha = 0.5)# Line Types for variables
+)
+
+```

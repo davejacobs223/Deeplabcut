@@ -1,0 +1,377 @@
+---
+title: "Logistic classifier"
+output: html_notebook
+---
+
+# load packages
+
+```{r}
+library(stats)
+library(dplyr)
+library(boot)
+library(ISLR2)
+library(MASS)
+library(ROCR)
+library(ggplot2)
+getwd()
+```
+
+
+# load data here
+```{r}
+data2=read.csv('all_aucs.csv')
+#data2=read.csv('clustCCFdecshift_seek.csv')
+data2$Cluster=factor(data2$block)
+data2=data2 %>% na.omit()
+data2norm=as.data.frame(data2) 
+#data2$Block=factor(data2$sk_Block)
+
+
+#data2norm=scale(data2[3:7]) %>% as.data.frame() # 7 for mpfcsk
+#data2norm=as.data.frame(data2) 
+#data2norm$Cluster=factor(data2$Cluster)
+#data2norm$Block=factor(data2$Block)
+train3=data2norm %>% filter(Cluster=='3') %>% sample_n(50)
+train1=data2norm %>% filter(Cluster=='1') %>% sample_n(50)
+train=rbind(train1,train3)
+
+trainshuf=transform( train, Cluster = sample(Cluster))
+```
+data2norm$Change=scale(data2norm$Pre)
+data2norm$Sum=scale(data2norm$Post)
+data2norm$Food=scale(data2norm$Food)
+data2norm$ofcChange=scale(data2norm$ofcChange)
+data2norm$ofcSum=scale(data2norm$ofcSum)
+data2norm$ofcFood=scale(data2norm$ofcFood)
+
+
+data2norm=data2norm[sample(1:nrow(data2norm)), ]
+
+
+#data vis
+```{r}
+ggplot(data2norm,aes(x=Food,y=Sum,color=Cluster))+geom_point(size=3,alpha=.4)+theme_classic()
+```
+
+```{r}
+glm.fits<-glm(Cluster~Change+Sum+Food,data=train,family=binomial)
+summary(glm.fits)
+```
+
+```{r}
+glm.fits<-glm(Cluster~sk+tk+Food,data=train,family=binomial)
+glm.probs<- predict(glm.fits,type='response')
+glm.pred<- rep("1",200) # make other state
+glm.pred[glm.probs > .5] = '3' #make a given state
+table(glm.pred,train$Cluster)
+mean(glm.pred == train$Cluster)
+```
+
+```{r}
+glm.pred<- rep("1",443) # make other state
+glm.pred[glm.probs > .5] = '3' #make a given state
+table(glm.pred,data2$Cluster)
+mean(glm.pred == data2$Cluster)#probability of correct prediction for training set
+```
+
+
+# add LOOCV here
+```{r}
+cv.err<-cv.glm(data2,glm.fits,K=10)
+cv.err$delta
+```
+
+
+
+
+#LDA
+```{r}
+lda.fitCV<-lda(Cluster~Pre*Post*tPre*tPost*Food,CV=TRUE,method='mle',data=train)
+a=table(train$Cluster, lda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+(a[4]+a[1])/200
+```
+
+```{r}
+lda.fitCV<-lda(Cluster~Change+Food+Change.take.,CV=TRUE,method='mle',data=datashuf)
+table(datashuf$Cluster, lda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+```
+
+```{r}
+
+vals=c()
+OFCvals=c()
+samples=20
+sessiontoget='STPre'
+region='mPFC'
+region2='mPFC'
+
+for (i in 1:40){
+  train3=data2norm %>% filter(Cluster=='3') %>% filter(Region == region)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  train2=data2norm %>% filter(Cluster=='2') %>% filter(Region == region)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  train1=data2norm %>% filter(Cluster=='1') %>% filter(Region == region)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  train=rbind(train1,train2,train3)
+  
+  OFCtrain3=data2norm %>% filter(Cluster=='3') %>% filter(Region == region2)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  OFCtrain2=data2norm %>% filter(Cluster=='2') %>% filter(Region == region2)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  OFCtrain1=data2norm %>% filter(Cluster=='1') %>% filter(Region == region2)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  OFCtrain=rbind(OFCtrain1,OFCtrain2,OFCtrain3)
+  #train=transform(train, Cluster = sample(Cluster))
+  #trainshuf=transform( train, Cluster = sample(Cluster))
+  #lda.fitCV<-lda(Cluster~Pre*Post+tPre*tPost,CV=TRUE,data=train)
+  lda.fitCV<-lda(Cluster~nolag,CV=TRUE,data=train)
+  OFClda.fitCV<-lda(Cluster~nolag,CV=TRUE,data=OFCtrain)
+  
+  #OFClda.fitCV<-lda(Cluster~sk_Change+tk_Sum+tk_Food,CV=TRUE,data=OFCtrain)
+  
+
+  
+  
+  
+  a=table(train$Cluster, lda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+  acc=(a[1]+a[5]+a[9])/(samples*3)
+  vals=c(vals,acc)
+  
+  
+  OFCa=table(OFCtrain$Cluster, OFClda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+  OFCacc=(OFCa[1]+OFCa[5]+OFCa[9])/(samples*3)
+  OFCvals=c(OFCvals,OFCacc)
+}
+vals
+mean(vals)
+sd(vals)
+
+write.csv(vals,paste(sessiontoget,region,'CL','.csv'))
+write.csv(OFCvals,paste(sessiontoget,region2,'CL','.csv'))
+```
+
+```{r}
+#set.seed(8675309)
+vals=c()
+OFCvals=c()
+samples=20
+sessiontoget='STE1'
+region='mPFC'
+region2='OFC'
+
+for (i in 1:40){
+  train4=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='4') %>% sample_n(samples)
+  train3=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='3') %>% sample_n(samples)
+  train2=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='2') %>% sample_n(samples)
+  train1=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='1') %>% sample_n(samples)
+  train=rbind(train1,train2,train3,train4)
+  
+  OFCtrain4=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='4') %>% sample_n(samples)
+  OFCtrain3=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='3') %>% sample_n(samples)
+  OFCtrain2=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='2') %>% sample_n(samples)
+  OFCtrain1=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='1') %>% sample_n(samples)
+  OFCtrain=rbind(OFCtrain1,OFCtrain2,OFCtrain3,OFCtrain4)
+  #train=transform(train, Block = sample(Block))
+  #trainshuf=transform( train, Cluster = sample(Cluster))
+  #lda.fitCV<-lda(Cluster~Pre*Post+tPre*tPost+Food,CV=TRUE,method='mle',data=train)
+  lda.fitCV<-lda(Block~sk_Change+tk_Sum+tk_Food,CV=TRUE,data=train)
+  OFClda.fitCV<-lda(Block~sk_Change+tk_Sum+tk_Food,CV=TRUE,data=OFCtrain)
+  
+  a=table(train$Block, lda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+  acc=(a[16]+a[6]+a[11]+a[1])/(samples*4)
+  vals=c(vals,acc)
+  
+  OFCa=table(OFCtrain$Block, OFClda.fitCV$class, dnn = c('Actual Group','Predicted Group'))
+  OFCacc=(OFCa[16]+OFCa[6]+OFCa[11]+OFCa[1])/(samples*4)
+  OFCvals=c(OFCvals,OFCacc)
+}
+vals
+mean(vals)
+sd(vals)
+
+write.csv(vals,paste(sessiontoget,region,'BK','.csv'))
+write.csv(OFCvals,paste(sessiontoget,region2,'BK','.csv'))
+
+```
+
+
+
+```{r}
+
+vals=c()
+OFCvals=c()
+samples=20
+sessiontoget='STPre'
+region='mPFC'
+region2='OFC'
+weights=data.frame(metric=c('s','t','f'))
+
+
+for (i in 1:40){
+
+  train3=data2norm %>% filter(Cluster=='3') %>% filter(Region == region)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  train2=data2norm %>% filter(Cluster=='2') %>% filter(Region == region)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  train1=data2norm %>% filter(Cluster=='1') %>% filter(Region == region)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  train=rbind(train1,train2,train3)
+  
+  OFCtrain3=data2norm %>% filter(Cluster=='3') %>% filter(Region == region2)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  OFCtrain2=data2norm %>% filter(Cluster=='2') %>% filter(Region == region2)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  OFCtrain1=data2norm %>% filter(Cluster=='1') %>% filter(Region == region2)%>% filter(sk_Session == sessiontoget)%>% sample_n(samples)
+  OFCtrain=rbind(OFCtrain1,OFCtrain2,OFCtrain3)
+  #train=transform(train, Cluster = sample(Cluster))
+  #trainshuf=transform( train, Cluster = sample(Cluster))
+  #lda.fitCV<-lda(Cluster~Pre*Post+tPre*tPost,CV=TRUE,data=train)
+  lda.fitCV<-lda(Cluster~sk_Change+tk_Sum+tk_Food,data=train)
+  OFClda.fitCV<-lda(Cluster~sk_Change+tk_Sum+tk_Food,data=OFCtrain)
+  
+  saveweight=lda.fitCV$scaling[1:3]
+  saveweightOFC=OFClda.fitCV$scaling[1:3]
+  weights[i+1]<-c(saveweight)
+  
+  
+  crosstest=predict(lda.fitCV,OFCtrain)
+  crosstest2=predict(OFClda.fitCV,train)
+  
+  
+  
+  a=table(OFCtrain$Cluster, crosstest$class, dnn = c('Actual Group','Predicted Group'))
+  acc=(a[1]+a[5]+a[9])/(samples*3)
+  vals=c(vals,acc)
+  
+  
+  OFCa=table(train$Cluster, crosstest2$class, dnn = c('Actual Group','Predicted Group'))
+  OFCacc=(OFCa[1]+OFCa[5]+OFCa[9])/(samples*3)
+  OFCvals=c(OFCvals,OFCacc)
+}
+vals
+mean(vals)
+sd(vals)
+
+write.csv(vals,paste(sessiontoget,region,'CLcross','.csv'))
+write.csv(OFCvals,paste(sessiontoget,region2,'CLcross','.csv'))
+```
+
+
+```{r}
+#set.seed(8675309)
+vals=c()
+OFCvals=c()
+samples=20
+sessiontoget='STE1'
+region='mPFC'
+region2='OFC'
+
+for (i in 1:40){
+  train4=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='4') %>% sample_n(samples)
+  train3=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='3') %>% sample_n(samples)
+  train2=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='2') %>% sample_n(samples)
+  train1=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region) %>% filter(Block=='1') %>% sample_n(samples)
+  train=rbind(train1,train2,train3,train4)
+  
+  OFCtrain4=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='4') %>% sample_n(samples)
+  OFCtrain3=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='3') %>% sample_n(samples)
+  OFCtrain2=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='2') %>% sample_n(samples)
+  OFCtrain1=data2norm%>% filter(sk_Session == sessiontoget)%>% filter(Region == region2) %>% filter(Block=='1') %>% sample_n(samples)
+  OFCtrain=rbind(OFCtrain1,OFCtrain2,OFCtrain3,OFCtrain4)
+  train=transform(train, Block = sample(Block))
+  #trainshuf=transform( train, Cluster = sample(Cluster))
+  #lda.fitCV<-lda(Cluster~Pre*Post+tPre*tPost+Food,CV=TRUE,method='mle',data=train)
+  lda.fitCV<-lda(Block~sk_Change+tk_Sum+tk_Food,data=train)
+  OFClda.fitCV<-lda(Block~sk_Change+tk_Sum+tk_Food,data=OFCtrain)
+  
+  
+  
+  
+  crosstest=predict(lda.fitCV,OFCtrain)
+  crosstest2=predict(OFClda.fitCV,train)
+  
+  
+  
+  a=table(OFCtrain$Block, crosstest$class, dnn = c('Actual Group','Predicted Group'))
+  acc=(a[16]+a[6]+a[11]+a[1])/(samples*4)
+  vals=c(vals,acc)
+  
+  OFCa=table(train$Block, crosstest2$class, dnn = c('Actual Group','Predicted Group'))
+  OFCacc=(OFCa[16]+OFCa[6]+OFCa[11]+OFCa[1])/(samples*4)
+  OFCvals=c(OFCvals,OFCacc)
+}
+vals
+mean(vals)
+sd(vals)
+
+write.csv(vals,paste(sessiontoget,region,'BKcrosss','.csv'))
+write.csv(OFCvals,paste(sessiontoget,region2,'BKcross','.csv'))
+
+```
+
+
+
+#lda with 10 folds
+```{r}
+mae <- c()
+chunks=443/10
+
+
+data3 <- data2norm[sample(1:nrow(data2norm)), ]
+
+for (i in 1:10){
+  train_data <- data3[-((i*44-43):(i*44)), ]
+  test_data <- data3[((i*44-43):(i*44)), ]
+  m_lda <- lda(Cluster~Change+Food+Sum, data = train_data)
+  m_pred <- predict(m_lda, test_data)
+  mae <- c(mae, mean(abs( as.integer(m_pred$class == '1') - as.integer(test_data$Cluster == '1'))))
+}
+
+
+1-mean(mae)
+1-mae
+```
+#QDA
+```{r}
+qda.fit<-qda(Cluster~Change+tSum+Food,data=train)
+qda.fit
+qda.pred<-predict(qda.fit,train)
+mean(qda.pred$class==train$Cluster)
+```
+
+#naive bayes
+```{r}
+library(e1071)
+nb.fit<-naiveBayes(Cluster~Change+tSum+Food,data=train)
+nb.fit
+nb.class<-predict(nb.fit,train)
+mean(nb.class==train$Cluster)
+tune(naiveBayes,Cluster~Change+tSum+Food,data=train)
+```
+
+#SVM
+```{r}
+samples=40
+train3=data2norm %>% filter(Cluster=='3') %>% sample_n(samples)
+train2=data2norm %>% filter(Cluster=='2') %>% sample_n(samples)
+train1=data2norm %>% filter(Cluster=='1') %>% sample_n(samples)
+train=rbind(train1,train2,train3)
+#train=transform( train, Cluster = sample(Cluster))
+
+
+#SVC
+svm.fit<-svm(Cluster~Change.mp+take.mp,data=train,kernel='radial',cost=1,gamma=.1,scale=FALSE)
+#fitted=svm.fit$decision.values
+plot(svm.fit,train,Change.mp~take.mp)
+summary(svm.fit)
+#summary(svm.fit)
+
+
+
+
+tune.out=tune(svm,Cluster~Change.mp+take.mp,data=train,kernel='radial',scale=FALSE,ranges=list(
+  cost=c(.1,1,10,100,1000), gamma = c(.1,.5,1,2,4)))
+summary(tune.out)
+```
+
+
+#ROC
+```{r}
+rocplot <- function(pred,truth,...){
+  predob<-prediction(pred,truth)
+  perf<-performance(predob, 'tpr','fpr')
+  plot(perf,...)
+}
+par(mfrom=c(1,2))
+rocplot(fitted,data2$Cluster,add=T)
+```
+
